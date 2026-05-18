@@ -1,0 +1,11 @@
+server:
+  host: "127.0.0.1"
+  port: 5309
+  music_dir: "../music"
+
+stations:
+  - id: lofi
+    name: "Lo-Fi Beats"
+    genre: "Electronic"
+    frequency: "98.7"
+    description: "Chill beats to mine to"
