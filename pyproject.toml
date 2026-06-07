@@ -1,0 +1,29 @@
+[project]
+name = "mcradio"
+version = "0.1.0"
+description = "Minecraft CC:Tweaked internet radio — DFPWM streaming server + Lua client"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "vakermit", email = "complaints@vakermit.net" }]
+
+dependencies = [
+    "typer>=0.12.0",
+    "rich>=13.0",
+    "aiohttp>=3.9",
+    "pyyaml>=6.0",
+    "yt-dlp",
+]
+
+[project.scripts]
+mcradio = "mcradio.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcradio"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

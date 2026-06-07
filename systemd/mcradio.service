@@ -1,0 +1,32 @@
+[Unit]
+Description=Minecraft CC:Tweaked Radio Server (DFPWM)
+After=network.target
+Documentation=https://github.com/vakermit/mcradio
+
+[Service]
+Type=simple
+User=icecast
+Group=icecast
+WorkingDirectory=/opt/icecast
+ExecStart=/opt/icecast/.venv/bin/mcradio serve
+Restart=always
+RestartSec=3
+
+# Resource limits
+MemoryMax=512M
+CPUQuota=80%
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/icecast
+PrivateTmp=true
+ProtectHome=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mcradio
+
+[Install]
+WantedBy=multi-user.target

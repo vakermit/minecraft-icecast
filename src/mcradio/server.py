@@ -1,5 +1,5 @@
 """
-Minecraft CC:Tweaked Radio Server — Phase 1
+Minecraft CC:Tweaked Radio Server
 Serves pre-transcoded DFPWM audio as 16KB chunks over HTTP.
 Radio model: all listeners on a station share the same playback position.
 
@@ -20,13 +20,14 @@ from typing import Any
 import yaml
 from aiohttp import web
 
+from mcradio.config import get_client_dir, get_config_path, get_music_dir
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 CHUNK_SIZE: int = 16384  # 16KB — exactly one CC:Tweaked speaker buffer
 PROTOCOL_VERSION: int = 1
-DEFAULT_CONFIG_PATH: str = "stations.yaml"
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -200,8 +201,15 @@ class StationState:
 class RadioServer:
     """HTTP server that serves DFPWM audio chunks to CC:Tweaked clients."""
 
-    def __init__(self, config_path: str = DEFAULT_CONFIG_PATH) -> None:
-        self.config_path: Path = Path(config_path)
+    def __init__(
+        self,
+        config_path: Path | None = None,
+        music_dir: Path | None = None,
+        client_dir: Path | None = None,
+    ) -> None:
+        self.config_path: Path = config_path or get_config_path()
+        self._music_dir_override: Path | None = music_dir
+        self._client_dir: Path = client_dir or get_client_dir()
         self.config: dict[str, Any] = {}
         self.stations: dict[str, StationState] = {}
         self.start_time: float = 0.0
@@ -213,6 +221,7 @@ class RadioServer:
         self.app.router.add_get("/stream/{station_id}", self._handle_stream)
         self.app.router.add_get("/now-playing/{station_id}", self._handle_now_playing)
         self.app.router.add_get("/health", self._handle_health)
+        self.app.router.add_get("/client/{filename}", self._handle_client_file)
 
     def load_config(self) -> None:
         """Load stations.yaml and initialize station states."""
@@ -228,11 +237,19 @@ class RadioServer:
             sys.exit(1)
 
         server_cfg = self.config.get("server", {})
-        music_dir = Path(server_cfg.get("music_dir", "../music"))
 
-        # Resolve relative paths against the config file's directory
-        if not music_dir.is_absolute():
-            music_dir = (self.config_path.parent / music_dir).resolve()
+        # Determine music directory
+        if self._music_dir_override:
+            music_dir = self._music_dir_override
+        else:
+            cfg_music_dir = server_cfg.get("music_dir", None)
+            if cfg_music_dir:
+                music_dir = Path(cfg_music_dir)
+                # Resolve relative paths against the config file's directory
+                if not music_dir.is_absolute():
+                    music_dir = (self.config_path.parent / music_dir).resolve()
+            else:
+                music_dir = get_music_dir()
 
         stations_cfg = self.config.get("stations", [])
         if not stations_cfg:
@@ -396,6 +413,33 @@ class RadioServer:
         )
         return self._add_protocol_header(response)
 
+    async def _handle_client_file(self, request: web.Request) -> web.Response:
+        """GET /client/{filename} — Serve Lua client files."""
+        filename: str = request.match_info["filename"]
+        logger.debug("GET /client/%s from %s", filename, request.remote)
+
+        # Security: only allow .lua files, no path traversal
+        if "/" in filename or "\\" in filename or ".." in filename:
+            return web.Response(text="Forbidden", status=403)
+
+        if not filename.endswith(".lua"):
+            return web.Response(text="Not found", status=404)
+
+        file_path = self._client_dir / filename
+        if not file_path.is_file():
+            return web.Response(
+                text=json.dumps({"error": "File not found", "filename": filename}),
+                status=404,
+                content_type="application/json",
+            )
+
+        content = file_path.read_text(encoding="utf-8")
+        response = web.Response(
+            text=content,
+            content_type="text/plain",
+        )
+        return self._add_protocol_header(response)
+
     # --- Metadata helpers ---------------------------------------------------
 
     def _load_track_metadata(self, station_id: str, track_stem: str | None) -> dict[str, Any]:
@@ -446,6 +490,7 @@ class RadioServer:
 
         logger.info("Radio server listening on http://%s:%d", host, port)
         logger.info("Stations: %s", ", ".join(self.stations.keys()) if self.stations else "(none)")
+        logger.info("Client files: %s", self._client_dir)
 
         # Wait for shutdown signal
         stop_event = asyncio.Event()
@@ -470,20 +515,23 @@ class RadioServer:
 
 
 # ---------------------------------------------------------------------------
-# Entry point
+# Entry point (called by CLI)
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
-    """Entry point for the radio server."""
-    config_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_CONFIG_PATH
-    server = RadioServer(config_path=config_path)
+def run_server(
+    config_path: Path | None = None,
+    music_dir: Path | None = None,
+    client_dir: Path | None = None,
+) -> None:
+    """Start the radio server. Called by `mcradio serve`."""
+    server = RadioServer(
+        config_path=config_path,
+        music_dir=music_dir,
+        client_dir=client_dir,
+    )
 
     try:
         asyncio.run(server.start())
     except KeyboardInterrupt:
         pass
-
-
-if __name__ == "__main__":
-    main()

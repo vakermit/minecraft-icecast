@@ -1,7 +1,7 @@
 server:
   host: "127.0.0.1"
   port: 5309
-  music_dir: "../music"
+  music_dir: "./music"
 
 stations:
   - id: lofi
