@@ -1,0 +1,21 @@
+# Runtime state (when deployed to /opt/icecast)
+log/
+run/
+
+# Python
+__pycache__/
+*.pyc
+server/venv/
+
+# Music files (large, downloaded per-host)
+music/raw/
+music/dfpwm/**/*.dfpwm
+!music/dfpwm/.gitkeep
+
+# SQLite database
+*.db
+*.db-journal
+*.db-wal
+
+# OS
+.DS_Store
