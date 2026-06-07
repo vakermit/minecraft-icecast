@@ -9,3 +9,22 @@ stations:
     genre: "Electronic"
     frequency: "98.7"
     description: "Chill beats to mine to"
+    rotation: shuffle
+    sources:
+      - type: search
+        query: "lo-fi hip hop instrumental"
+        max_tracks: 30
+
+  - id: jazz
+    name: "Smooth Jazz FM"
+    genre: "Jazz"
+    frequency: "101.3"
+    description: "Late night jazz vibes"
+    rotation: sequential
+
+  - id: rock
+    name: "Classic Rock Radio"
+    genre: "Rock"
+    frequency: "104.9"
+    description: "The classics never die"
+    rotation: shuffle

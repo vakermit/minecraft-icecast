@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import signal
 import sys
 import time
@@ -54,13 +55,23 @@ class StationState:
     The station advances its position every time a chunk is served.
     """
 
-    def __init__(self, station_id: str, name: str, genre: str, frequency: str, description: str, dfpwm_dir: Path) -> None:
+    def __init__(
+        self,
+        station_id: str,
+        name: str,
+        genre: str,
+        frequency: str,
+        description: str,
+        dfpwm_dir: Path,
+        rotation: str = "sequential",
+    ) -> None:
         self.station_id: str = station_id
         self.name: str = name
         self.genre: str = genre
         self.frequency: str = frequency
         self.description: str = description
         self.dfpwm_dir: Path = dfpwm_dir
+        self.rotation: str = rotation  # "shuffle" or "sequential"
 
         # Playlist: sorted list of .dfpwm files in the station directory
         self.playlist: list[Path] = self._scan_playlist()
@@ -71,12 +82,26 @@ class StationState:
         # File handle for the currently open track (opened lazily)
         self._file_handle: Any = None
 
+        # Apply initial shuffle if rotation mode is shuffle
+        if self.rotation == "shuffle" and self.playlist:
+            random.shuffle(self.playlist)
+
     def _scan_playlist(self) -> list[Path]:
         """Scan the station's DFPWM directory for tracks, sorted by name."""
         if not self.dfpwm_dir.is_dir():
             return []
         tracks = sorted(self.dfpwm_dir.glob("*.dfpwm"))
         return tracks
+
+    def reload_playlist(self) -> None:
+        """Rescan tracks from disk and rebuild the playlist."""
+        self._close_file()
+        self.playlist = self._scan_playlist()
+        if self.rotation == "shuffle" and self.playlist:
+            random.shuffle(self.playlist)
+        # Reset position to avoid out-of-bounds
+        self.current_track = 0
+        self.current_offset = 0
 
     @property
     def has_tracks(self) -> bool:
@@ -137,12 +162,22 @@ class StationState:
             self._file_handle = None
 
     def _advance_track(self) -> None:
-        """Move to the next track in the playlist. Wraps to start."""
+        """Move to the next track in the playlist. Wraps to start.
+
+        If rotation is 'shuffle', reshuffle when wrapping around.
+        """
         self._close_file()
         self.current_offset = 0
         if not self.has_tracks:
             return
-        self.current_track = (self.current_track + 1) % len(self.playlist)
+
+        next_idx = (self.current_track + 1) % len(self.playlist)
+
+        # If we wrapped around and rotation is shuffle, reshuffle
+        if next_idx == 0 and self.rotation == "shuffle":
+            random.shuffle(self.playlist)
+
+        self.current_track = next_idx
         logger.info(
             "Station '%s' advanced to track %d/%d: %s",
             self.station_id,
@@ -213,8 +248,22 @@ class RadioServer:
         self.config: dict[str, Any] = {}
         self.stations: dict[str, StationState] = {}
         self.start_time: float = 0.0
+        self._music_dir: Path = Path(".")  # Set properly in load_config
+
+        # Background job manager
+        from mcradio.worker import JobManager
+
+        self.job_manager: JobManager = JobManager(
+            reload_station_callback=self.reload_station
+        )
+
         self.app: web.Application = web.Application()
         self._setup_routes()
+
+    @property
+    def music_dir(self) -> Path:
+        """Public accessor for the resolved music directory."""
+        return self._music_dir
 
     def _setup_routes(self) -> None:
         self.app.router.add_get("/stations", self._handle_stations)
@@ -222,6 +271,11 @@ class RadioServer:
         self.app.router.add_get("/now-playing/{station_id}", self._handle_now_playing)
         self.app.router.add_get("/health", self._handle_health)
         self.app.router.add_get("/client/{filename}", self._handle_client_file)
+
+        # Mount admin routes
+        from mcradio.admin import setup_admin_routes
+
+        setup_admin_routes(self.app, self)
 
     def load_config(self) -> None:
         """Load stations.yaml and initialize station states."""
@@ -251,6 +305,8 @@ class RadioServer:
             else:
                 music_dir = get_music_dir()
 
+        self._music_dir = music_dir
+
         stations_cfg = self.config.get("stations", [])
         if not stations_cfg:
             logger.warning("No stations defined in config")
@@ -258,6 +314,7 @@ class RadioServer:
         for station_def in stations_cfg:
             station_id: str = station_def["id"]
             dfpwm_dir = music_dir / "dfpwm" / station_id
+            rotation = station_def.get("rotation", "sequential")
 
             state = StationState(
                 station_id=station_id,
@@ -266,19 +323,29 @@ class RadioServer:
                 frequency=station_def.get("frequency", ""),
                 description=station_def.get("description", ""),
                 dfpwm_dir=dfpwm_dir,
+                rotation=rotation,
             )
 
             self.stations[station_id] = state
             logger.info(
-                "Loaded station '%s' (%s) — %d tracks in %s",
+                "Loaded station '%s' (%s) — %d tracks in %s [%s]",
                 station_id,
                 state.name,
                 state.track_count,
                 dfpwm_dir,
+                rotation,
             )
 
-        # Store music_dir for metadata lookups
-        self._music_dir: Path = music_dir
+    def reload_station(self, station_id: str) -> None:
+        """Rescan the dfpwm directory and rebuild the playlist for a station."""
+        if station_id not in self.stations:
+            raise ValueError(f"Station '{station_id}' not found")
+
+        state = self.stations[station_id]
+        state.reload_playlist()
+        logger.info(
+            "Reloaded station '%s' — %d tracks", station_id, state.track_count
+        )
 
     def _add_protocol_header(self, response: web.Response) -> web.Response:
         """Add the X-Radio-Protocol header to every response."""

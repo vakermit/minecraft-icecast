@@ -50,6 +50,7 @@ def config_file(tmp_path: Path) -> Path:
                 "genre": "Electronic",
                 "frequency": "98.7",
                 "description": "Chill beats to mine to",
+                "rotation": "sequential",
             }
         ],
     }))
