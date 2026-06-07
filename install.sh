@@ -5,7 +5,7 @@ set -euo pipefail
 # Usage: curl -sSL https://raw.githubusercontent.com/vakermit/mcradio/main/install.sh | bash
 
 INSTALL_DIR="/opt/icecast"
-REPO_URL="https://github.com/vakermit/mcradio.git"
+REPO_URL="https://github.com/vakermit/minecraft-icecast.git"
 SERVICE_USER="icecast"
 
 # ---------------------------------------------------------------------------
